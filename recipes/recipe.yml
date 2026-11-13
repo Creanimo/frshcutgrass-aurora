@@ -6,7 +6,7 @@ name: frshcutgrass-aurora
 description: This is my personal OS image.
 
 # the base image to build on top of (FROM) and the version tag to use
-base-image: ghcr.io/ublue-os/silverblue-main
+base-image: ghcr.io/ublue-os/aurora-dx-hwe
 image-version: latest # You can pin to a specific version of Fedora as well
 
 # module configuration, executed in order
@@ -41,5 +41,40 @@ modules:
           - org.mozilla.firefox
           - org.gnome.Loupe
       - scope: user # Also add Flathub user repo, but no user packages
+
+  - type: script
+    no-cache: true
+    snippets:
+      - |
+        set -euo pipefail
+        ARCH=$(uname -m)
+        case "$ARCH" in
+          x86_64) WS_ARCH="amd64" ;;
+          aarch64) WS_ARCH="arm64" ;;
+          *) echo "Unsupported architecture: $ARCH" && exit 1 ;;
+        esac
+
+        rpm --import https://windscribe.com/windscribe_linux_signing_key.pub
+
+        RPM_URL=$(curl -fsSL https://api.github.com/repos/Windscribe/Desktop-App/releases/latest \
+          | grep -oE "https://github\.com/Windscribe/Desktop-App/releases/download/[^\"]+/windscribe_[0-9][^\"]*_${WS_ARCH}_fedora\.rpm" \
+          | head -n 1)
+
+        test -n "$RPM_URL"
+        curl -fL "$RPM_URL" -o /tmp/windscribe.rpm
+        dnf install -y /tmp/windscribe.rpm
+        rm -f /tmp/windscribe.rpm
+
+        # Ensure /opt/windscribe persists across immutable atomic deployments
+        if [ -d /var/opt/windscribe ]; then
+          mkdir -p /usr/lib/opt
+          mv /var/opt/windscribe /usr/lib/opt/windscribe
+          echo "L+ /opt/windscribe - - - - /usr/lib/opt/windscribe" > /usr/lib/tmpfiles.d/windscribe.conf
+        fi
+
+  - type: systemd
+    system:
+      enabled:
+        - windscribe-helper.service
 
   - type: signing # this sets up the proper policy & signing files for signed images to work fully
